@@ -137,6 +137,69 @@ Die Markdown-Datei sieht dann etwa so aus:
 …
 ```
 
+## Globaler Befehl `urlaub` einrichten
+
+Damit du den Tracker bequem von überall mit `urlaub` aufrufen kannst (statt jedes Mal ins Projektverzeichnis zu wechseln):
+
+### 1. Wrapper-Skript ins Projektverzeichnis legen
+
+Die Datei `urlaub` (Shell-Skript ohne Endung) gehört in dasselbe Verzeichnis wie `urlaub_tracker.py`.
+
+### 2. `.env`-Datei für die iCal-URL anlegen
+
+Im Projektverzeichnis eine `.env`-Datei erstellen:
+
+```bash
+echo 'export URLAUB_ICAL_URL="https://p156-caldav.icloud.com/published/2/..."' > .env
+```
+
+> ⚠️ **Wichtig:** Das `export` darf nicht fehlen, sonst kommt die Variable nicht bei Python an.
+
+> 💡 **Tipp:** `.env` zu `.gitignore` hinzufügen, falls das Projekt in Git landet.
+
+### 3. Skript ausführbar machen
+
+```bash
+chmod +x urlaub
+```
+
+### 4. Symlink in den PATH legen
+
+```bash
+mkdir -p ~/.local/bin
+ln -s "$(pwd)/urlaub" ~/.local/bin/urlaub
+```
+
+> 📝 Auf neueren Macs existiert `/usr/local/bin` oft nicht – deshalb `~/.local/bin`.
+
+### 5. PATH prüfen
+
+```bash
+echo $PATH | tr ':' '\n' | grep -q "$HOME/.local/bin" && echo "✓ drin" || echo "✗ fehlt"
+```
+
+Falls "fehlt", zur Shell-Konfiguration hinzufügen:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+### 6. Testen
+
+Von einem **beliebigen Verzeichnis** aus:
+
+```bash
+urlaub
+```
+
+Das Wrapper-Skript:
+- findet sich selbst über den Symlink (egal wo das Projekt liegt)
+- lädt automatisch die `.env`-Datei aus dem Projektverzeichnis
+- nutzt das venv im Projektverzeichnis
+- gibt hilfreiche Fehlermeldungen falls etwas fehlt
+
+
 ## Automatisierung
 
 Damit das Skript regelmäßig (z.B. täglich) läuft, kannst du einen Cron-Job einrichten:

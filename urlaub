@@ -1,0 +1,49 @@
+#!/bin/bash
+# Wrapper-Skript für den Urlaubs-Tracker
+# Macht den Tracker von überall aufrufbar als `urlaub`
+
+set -e
+
+# Verzeichnis ermitteln, in dem dieses Skript tatsächlich liegt
+# (folgt Symlinks, damit z.B. ~/.local/bin/urlaub → ~/IdeaProjects/.../urlaub korrekt aufgelöst wird)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+PROJECT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+# URL aus separater Datei laden (sicherer als in der Shell-RC)
+ENV_FILE="$PROJECT_DIR/.env"
+if [ -f "$ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+fi
+
+# Check: Projektverzeichnis vorhanden?
+if [ ! -d "$PROJECT_DIR" ]; then
+    echo "❌ Projektverzeichnis nicht gefunden: $PROJECT_DIR"
+    echo "   Bitte PROJECT_DIR in $(realpath "$0") anpassen."
+    exit 1
+fi
+
+# Check: venv vorhanden?
+PYTHON="$PROJECT_DIR/venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+    echo "❌ Virtuelle Umgebung nicht gefunden: $PYTHON"
+    echo "   Bitte zuerst venv anlegen:"
+    echo "     cd $PROJECT_DIR && python3 -m venv venv && source venv/bin/activate && pip install icalendar requests holidays"
+    exit 1
+fi
+
+# Check: URL gesetzt?
+if [ -z "$URLAUB_ICAL_URL" ]; then
+    echo "❌ URLAUB_ICAL_URL nicht gesetzt."
+    echo "   Bitte in $ENV_FILE eintragen:"
+    echo "     URLAUB_ICAL_URL=\"https://...\""
+    exit 1
+fi
+
+# Skript ausführen
+exec "$PYTHON" "$PROJECT_DIR/urlaub_tracker.py" "$@"
