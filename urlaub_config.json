@@ -1,0 +1,10 @@
+{
+  "urlaubstage_pro_jahr": 31,
+  "bundesland": "HH",
+  "event_titel": "Urlaub",
+  "jahr": null,
+  "output_pfad": "~/Documents/Obsidian Vault/Urlaub.md",
+  "_kommentar_bundesland": "Kürzel: BW, BY, BE, BB, HB, HH, HE, MV, NI, NW, RP, SL, SN, ST, SH, TH",
+  "_kommentar_jahr": "null = aktuelles Jahr, sonst z.B. 2026",
+  "_kommentar_output": "Pfad zur .md-Datei. ~ wird zum Home-Verzeichnis expandiert."
+}
