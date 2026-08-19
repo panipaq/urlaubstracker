@@ -2,6 +2,9 @@
 
 Liest Urlaubs-Events aus einem iCloud-Kalender und generiert eine Markdown-Übersicht mit Resturlaubs-Berechnung. Berücksichtigt automatisch Wochenenden und gesetzliche Feiertage des gewählten Bundeslandes.
 
+![image](cal.png)
+![image](md.png)
+
 ## Features
 
 - Liest Urlaube direkt aus dem iCloud-Kalender (via öffentlichem iCal-Link)
