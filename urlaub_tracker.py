@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Urlaubs-Tracker: Liest Urlaubs-Events aus einem iCloud-Kalender
-und schreibt eine Markdown-Übersicht mit Resturlaubs-Berechnung.
+Urlaubs-Tracker: Liest Urlaubs-, Homeoffice- und Krankheits-Events aus einem
+iCloud-Kalender und schreibt eine Markdown-Übersicht mit Resturlaubs-Berechnung.
 
 Konfiguration: urlaub_config.json (im selben Verzeichnis)
 Benötigt: pip install icalendar requests holidays
@@ -9,6 +9,7 @@ Benötigt: pip install icalendar requests holidays
 
 import json
 import os
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -37,8 +38,11 @@ def lade_config() -> dict:
         config = json.load(f)
 
     config.setdefault("urlaubstage_pro_jahr", 30)
+    config.setdefault("resturlaub_nehmen_bis", "31.03.")
     config.setdefault("bundesland", "BY")
     config.setdefault("event_titel", "Urlaub")
+    config.setdefault("ho_titel", "HO")
+    config.setdefault("krank_titel", "krank")
     config.setdefault("output_pfad", "~/Documents/urlaub.md")
     config["output_pfad"] = Path(config["output_pfad"]).expanduser()
     if not config.get("jahr"):
@@ -47,11 +51,61 @@ def lade_config() -> dict:
     return config
 
 
-def hole_feiertage(jahr: int, bundesland: str) -> set[date]:
-    """Holt die gesetzlichen Feiertage für ein deutsches Bundesland."""
+def kontingent_fuer(config: dict, jahr: int) -> int:
+    """
+    Urlaubsanspruch für ein Jahr. `urlaubstage_pro_jahr` ist entweder eine Zahl
+    (gilt für alle Jahre) oder z.B. {"2026": 31, "2027": 34}. Für Jahre ohne
+    Eintrag gilt der letzte bekannte Wert davor.
+    """
+    wert = config["urlaubstage_pro_jahr"]
+    if isinstance(wert, int):
+        return wert
+    pro_jahr = {int(j): t for j, t in wert.items()}
+    vorher = [j for j in pro_jahr if j <= jahr]
+    return pro_jahr[max(vorher)] if vorher else pro_jahr[min(pro_jahr)]
+
+
+def verfall_frist(config: dict, jahr: int) -> date:
+    """Bis zu diesem Tag (inklusive) muss der Übertrag genommen sein."""
+    frist = datetime.strptime(config["resturlaub_nehmen_bis"], "%d.%m.")
+    return date(jahr, frist.month, frist.day)
+
+
+def verfall_fuer(urlaube: list[dict], config: dict, jahr: int, uebertrag: int) -> int:
+    """
+    Übertrag, der nicht bis zur Frist genommen bzw. eingeplant ist.
+    Urlaub bis zur Frist wird zuerst vom Übertrag abgezogen.
+    """
+    if uebertrag <= 0:
+        return 0
+    frist = verfall_frist(config, jahr)
+    tage_bis_frist = sum(1 for u in urlaube for t in u["tage"] if t.year == jahr and t <= frist)
+    return max(0, uebertrag - tage_bis_frist)
+
+
+def uebertrag_fuer(urlaube: list[dict], config: dict, jahr: int) -> int:
+    """
+    Resturlaub aus dem Vorjahr. Wird ab dem ersten Jahr in `urlaubstage_pro_jahr`
+    Jahr für Jahr fortgerechnet (Anspruch + Übertrag - verfallen - genommen).
+    """
+    wert = config["urlaubstage_pro_jahr"]
+    if isinstance(wert, int):
+        return 0
+    rest = 0
+    for j in range(min(int(k) for k in wert), jahr):
+        genommen = sum(u["tage_im_jahr"].get(j, 0) for u in urlaube)
+        verfallen = verfall_fuer(urlaube, config, j, rest)
+        rest = kontingent_fuer(config, j) + rest - verfallen - genommen
+    return rest
+
+
+def hole_feiertage(jahr: int, bundesland: str):
+    """
+    Holt die gesetzlichen Feiertage für ein deutsches Bundesland.
+    Weitere Jahre (z.B. für HO/Krank pro Jahr) werden bei `in` automatisch nachgeladen.
+    """
     try:
-        feiertage = holidays.Germany(years=[jahr, jahr + 1], subdiv=bundesland)
-        return set(feiertage.keys())
+        return holidays.Germany(years=[jahr, jahr + 1], subdiv=bundesland)
     except (KeyError, NotImplementedError) as e:
         print(f"⚠ Bundesland '{bundesland}' nicht erkannt: {e}")
         print("  Feiertage werden NICHT berücksichtigt.")
@@ -79,6 +133,33 @@ def normalize_date(value) -> date:
     return value
 
 
+def event_zeitraum(component) -> tuple[date, date]:
+    """
+    Liefert (start, ende_exklusiv) als date.
+    Ganztägige Events: DTEND ist bereits exklusiv.
+    Termine mit Uhrzeit (z.B. HO 08:30–16:30): zählen für jeden angebrochenen Tag.
+    """
+    start_roh = component.get("DTSTART").dt
+    dtend = component.get("DTEND")
+    ende_roh = dtend.dt if dtend else start_roh
+    start = normalize_date(start_roh)
+
+    if isinstance(ende_roh, datetime):
+        ende_exkl = ende_roh.date()
+        if ende_roh.time() != datetime.min.time():
+            ende_exkl += timedelta(days=1)
+    else:
+        ende_exkl = ende_roh
+    return start, max(ende_exkl, start + timedelta(days=1))
+
+
+def titel_passt(summary: str, begriff: str, ganzes_wort: bool = False) -> bool:
+    """Case-insensitive Titel-Check. ganzes_wort verhindert z.B. 'HO' in 'Honey'."""
+    if ganzes_wort:
+        return re.search(rf"\b{re.escape(begriff)}\b", summary, re.IGNORECASE) is not None
+    return begriff.lower() in summary.lower()
+
+
 def werktage_zwischen(start: date, ende_exklusiv: date, feiertage: set[date]) -> list[date]:
     """
     Gibt alle echten Arbeitstage (Mo-Fr, ohne Feiertage) im Intervall zurück.
@@ -95,16 +176,16 @@ def werktage_zwischen(start: date, ende_exklusiv: date, feiertage: set[date]) ->
     return tage
 
 
-def extrahiere_urlaube(cal: Calendar, titel_filter: str, feiertage: set[date]) -> list[dict]:
-    """Findet alle Urlaubs-Events und berechnet Arbeitstage."""
+def extrahiere_events(cal: Calendar, titel_filter: str, feiertage: set[date],
+                      ganzes_wort: bool = False) -> list[dict]:
+    """Findet alle passenden Events und berechnet Arbeitstage."""
     urlaube = []
     for component in cal.walk("VEVENT"):
         summary = str(component.get("SUMMARY", "")).strip()
-        if titel_filter.lower() not in summary.lower():
+        if not titel_passt(summary, titel_filter, ganzes_wort):
             continue
 
-        start = normalize_date(component.get("DTSTART").dt)
-        ende_exkl = normalize_date(component.get("DTEND").dt)
+        start, ende_exkl = event_zeitraum(component)
         ende_inkl = ende_exkl - timedelta(days=1)
 
         arbeitstage = werktage_zwischen(start, ende_exkl, feiertage)
@@ -114,6 +195,7 @@ def extrahiere_urlaube(cal: Calendar, titel_filter: str, feiertage: set[date]) -
             "start": start,
             "ende": ende_inkl,
             "arbeitstage": len(arbeitstage),
+            "tage": arbeitstage,
             "tage_im_jahr": {},
         }
         for t in arbeitstage:
@@ -124,10 +206,15 @@ def extrahiere_urlaube(cal: Calendar, titel_filter: str, feiertage: set[date]) -
     return urlaube
 
 
-def schreibe_markdown(urlaube: list[dict], config: dict, pfad: Path):
+def schreibe_markdown(urlaube: list[dict], ho: list[dict], krank: list[dict],
+                      config: dict, pfad: Path):
     """Generiert die Markdown-Datei."""
     jahr = config["jahr"]
-    kontingent = config["urlaubstage_pro_jahr"]
+    kontingent = kontingent_fuer(config, jahr)
+    uebertrag = uebertrag_fuer(urlaube, config, jahr)
+    frist = verfall_frist(config, jahr)
+    # Vor der Frist: Übertrag, der noch nicht eingeplant ist. Danach: verfallen.
+    nicht_eingeplant = verfall_fuer(urlaube, config, jahr, uebertrag)
     bundesland = config["bundesland"]
     heute = date.today()
 
@@ -137,7 +224,9 @@ def schreibe_markdown(urlaube: list[dict], config: dict, pfad: Path):
 
     tage_genommen = sum(u["tage_im_jahr"].get(jahr, 0) for u in genommen + aktuell)
     tage_geplant = sum(u["tage_im_jahr"].get(jahr, 0) for u in geplant)
-    tage_rest = kontingent - tage_genommen - tage_geplant
+    tage_rest = kontingent + uebertrag - tage_genommen - tage_geplant
+    if heute > frist:
+        tage_rest -= nicht_eingeplant
 
     lines = []
     lines.append(f"# Urlaubsübersicht {jahr}")
@@ -150,10 +239,18 @@ def schreibe_markdown(urlaube: list[dict], config: dict, pfad: Path):
     lines.append("| | Tage |")
     lines.append("|---|---:|")
     lines.append(f"| Jahreskontingent | {kontingent} |")
+    if uebertrag:
+        lines.append(f"| Übertrag aus {jahr - 1} | {uebertrag} |")
+    if nicht_eingeplant and heute > frist:
+        lines.append(f"| Verfallen am {frist.strftime('%d.%m.')} | -{nicht_eingeplant} |")
     lines.append(f"| Bereits genommen | {tage_genommen} |")
     lines.append(f"| Bereits geplant | {tage_geplant} |")
     lines.append(f"| **Verbleibend (verplanbar)** | **{tage_rest}** |")
     lines.append("")
+    if nicht_eingeplant and heute <= frist:
+        lines.append(f"> ⚠️ **{nicht_eingeplant} Tag(e) Resturlaub** aus {jahr - 1} sind noch nicht "
+                     f"eingeplant und verfallen nach dem {frist.strftime('%d.%m.%Y')}.")
+        lines.append("")
 
     def render_liste(titel: str, items: list[dict]):
         if not items:
@@ -176,15 +273,39 @@ def schreibe_markdown(urlaube: list[dict], config: dict, pfad: Path):
     render_liste("📅 Geplante Urlaube", geplant)
     render_liste("✅ Bereits genommen", genommen)
 
+    # ---------- Homeoffice & Krankheit ----------
+    def tage_pro_jahr(events: list[dict]) -> dict[int, int]:
+        # set, damit mehrere Termine am selben Tag nur einmal zählen;
+        # nur Tage bis heute (keine geplanten)
+        tage = {t for e in events for t in e["tage"] if t <= heute}
+        zaehlung = {}
+        for t in tage:
+            zaehlung[t.year] = zaehlung.get(t.year, 0) + 1
+        return zaehlung
+
+    ho_pro_jahr = tage_pro_jahr(ho)
+    krank_pro_jahr = tage_pro_jahr(krank)
+    jahre = sorted(set(ho_pro_jahr) | set(krank_pro_jahr), reverse=True)
+
+    if jahre:
+        lines.append("## Homeoffice & Krankheit")
+        lines.append("")
+        lines.append("| Jahr | Homeoffice-Tage | Krankheitstage |")
+        lines.append("|---|---:|---:|")
+        for j in jahre:
+            lines.append(f"| {j} | {ho_pro_jahr.get(j, 0)} | {krank_pro_jahr.get(j, 0)} |")
+        lines.append("")
+
     pfad.parent.mkdir(parents=True, exist_ok=True)
     pfad.write_text("\n".join(lines), encoding="utf-8")
     print(f"✓ Geschrieben: {pfad}")
     print(f"  Genommen: {tage_genommen} | Geplant: {tage_geplant} | Rest: {tage_rest}")
+    print(f"  Homeoffice: {ho_pro_jahr.get(jahr, 0)} | Krank: {krank_pro_jahr.get(jahr, 0)}")
 
 
 def main():
     config = lade_config()
-    print(f"Config: {config['urlaubstage_pro_jahr']} Tage, "
+    print(f"Config: {kontingent_fuer(config, config['jahr'])} Tage, "
           f"Bundesland {config['bundesland']}, Jahr {config['jahr']}")
 
     feiertage = hole_feiertage(config["jahr"], config["bundesland"])
@@ -192,10 +313,12 @@ def main():
 
     print("Lade Kalender …")
     cal = fetch_calendar(ICAL_URL)
-    urlaube = extrahiere_urlaube(cal, config["event_titel"], feiertage)
-    print(f"Gefunden: {len(urlaube)} Urlaubs-Event(s)")
+    urlaube = extrahiere_events(cal, config["event_titel"], feiertage)
+    ho = extrahiere_events(cal, config["ho_titel"], feiertage, ganzes_wort=True)
+    krank = extrahiere_events(cal, config["krank_titel"], feiertage)
+    print(f"Gefunden: {len(urlaube)} Urlaubs-, {len(ho)} HO-, {len(krank)} Krank-Event(s)")
 
-    schreibe_markdown(urlaube, config, config["output_pfad"])
+    schreibe_markdown(urlaube, ho, krank, config, config["output_pfad"])
 
 
 if __name__ == "__main__":

@@ -10,8 +10,10 @@ Liest Urlaubs-Events aus einem iCloud-Kalender und generiert eine Markdown-Über
 - Liest Urlaube direkt aus dem iCloud-Kalender (via öffentlichem iCal-Link)
 - Zählt nur Arbeitstage (Wochenenden und Feiertage werden abgezogen)
 - Automatische Feiertagsberechnung für alle deutschen Bundesländer
-- Resturlaubs-Berechnung: `Kontingent - genommen - geplant`
+- Resturlaubs-Berechnung: `Kontingent + Übertrag - genommen - geplant`
+- Automatischer Resturlaub-Übertrag ins nächste Jahr inkl. Verfall-Frist (z.B. 31.03.), Urlaubsanspruch pro Jahr konfigurierbar
 - Trennung in *aktuell im Urlaub*, *geplant* und *bereits genommen*
+- Zählt zusätzlich **Homeoffice-Tage** und **Krankheitstage** pro Jahr (nur bis heute)
 -  Konfiguration via JSON-Datei
 - Output als saubere Markdown-Datei (z.B. für Obsidian)
 
@@ -71,9 +73,15 @@ In `urlaub_config.json`:
 
 ```json
 {
-  "urlaubstage_pro_jahr": 31,
+  "urlaubstage_pro_jahr": {
+    "2026": 31,
+    "2027": 34
+  },
+  "resturlaub_nehmen_bis": "31.03.",
   "bundesland": "BY",
   "event_titel": "Urlaub",
+  "ho_titel": "HO",
+  "krank_titel": "krank",
   "jahr": null,
   "output_pfad": "~/Documents/urlaub.md"
 }
@@ -81,9 +89,12 @@ In `urlaub_config.json`:
 
 | Feld | Bedeutung |
 |---|---|
-| `urlaubstage_pro_jahr` | Dein Jahreskontingent |
+| `urlaubstage_pro_jahr` | Dein Jahreskontingent pro Jahr. Fehlende Jahre übernehmen den letzten Wert davor. Ab dem ersten eingetragenen Jahr wird Resturlaub automatisch übertragen. Eine einfache Zahl (z.B. `31`) geht auch – dann ohne Übertrag. |
+| `resturlaub_nehmen_bis` | Frist (TT.MM.) für den Übertrag aus dem Vorjahr. Urlaub bis zur Frist wird zuerst vom Übertrag abgezogen, der Rest verfällt danach. Vorher gibt es eine Warnung. |
 | `bundesland` | Kürzel für Feiertage (siehe unten) |
 | `event_titel` | Filter für Kalender-Events (case-insensitive) |
+| `ho_titel` | Homeoffice-Filter – muss als **ganzes Wort** im Titel stehen (`Work HO` ✓, `Honey` ✗) |
+| `krank_titel` | Krankheits-Filter (case-insensitive, Teilstring, z.B. `Krankheit`) |
 | `jahr` | `null` = aktuelles Jahr, sonst z.B. `2026` |
 | `output_pfad` | Wohin die `.md`-Datei geschrieben wird |
 
@@ -224,6 +235,7 @@ Auf macOS kannst du alternativ `launchd` nutzen (eleganter, aber aufwändiger zu
 - Nur **Werktage (Mo–Fr)** zählen
 - **Feiertage** im konfigurierten Bundesland werden abgezogen
 - **Urlaube über Jahreswechsel** werden korrekt auf beide Jahre aufgeteilt (z.B. 28.12.–05.01.)
+- Termine mit Uhrzeit (z.B. HO 08:30–16:30) zählen als ganzer Tag, mehrere HO-Termine am selben Tag nur einmal
 - iCal-`DTEND` ist exklusiv (Standard) – wird beim Anzeigen korrigiert, sodass der letzte tatsächliche Urlaubstag erscheint
 
 ## Lizenz

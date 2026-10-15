@@ -1,9 +1,17 @@
 {
-  "urlaubstage_pro_jahr": 31,
+  "urlaubstage_pro_jahr": {
+    "2026": 31,
+    "2027": 34
+  },
+  "resturlaub_nehmen_bis": "31.03.",
   "bundesland": "HH",
   "event_titel": "Urlaub",
+  "ho_titel": "HO",
+  "krank_titel": "krank",
   "jahr": null,
   "output_pfad": "~/Documents/Obsidian Vault/Urlaub.md",
+  "_kommentar_urlaubstage": "Anspruch pro Jahr. Fehlende Jahre übernehmen den letzten Wert davor. Resturlaub wird ab dem ersten Jahr automatisch übertragen.",
+  "_kommentar_resturlaub": "Bis zu diesem Tag (TT.MM.) muss der Übertrag aus dem Vorjahr genommen sein, danach verfällt er.",
   "_kommentar_bundesland": "Kürzel: BW, BY, BE, BB, HB, HH, HE, MV, NI, NW, RP, SL, SN, ST, SH, TH",
   "_kommentar_jahr": "null = aktuelles Jahr, sonst z.B. 2026",
   "_kommentar_output": "Pfad zur .md-Datei. ~ wird zum Home-Verzeichnis expandiert."
