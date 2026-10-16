@@ -67,7 +67,7 @@ def kontingent_fuer(config: dict, jahr: int) -> int:
 
 def verfall_frist(config: dict, jahr: int) -> date:
     """Bis zu diesem Tag (inklusive) muss der Übertrag genommen sein."""
-    frist = datetime.strptime(config["resturlaub_nehmen_bis"], "%d.%m.")
+    frist = datetime.strptime(f"{config['resturlaub_nehmen_bis']}{jahr}", "%d.%m.%Y")
     return date(jahr, frist.month, frist.day)
 
 
@@ -206,35 +206,32 @@ def extrahiere_events(cal: Calendar, titel_filter: str, feiertage: set[date],
     return urlaube
 
 
-def schreibe_markdown(urlaube: list[dict], ho: list[dict], krank: list[dict],
-                      config: dict, pfad: Path):
-    """Generiert die Markdown-Datei."""
-    jahr = config["jahr"]
+def urlaub_abschnitt(urlaube: list[dict], config: dict, jahr: int, heute: date,
+                     ebene: str) -> tuple[list[str], tuple[int, int, int]]:
+    """
+    Übersicht + Listen für ein Jahr. `ebene` ist das Überschriften-Präfix
+    ("##" fürs aktuelle Jahr, "###" für den Ausblick aufs nächste).
+    Gibt die Zeilen und (genommen, geplant, rest) zurück.
+    """
     kontingent = kontingent_fuer(config, jahr)
     uebertrag = uebertrag_fuer(urlaube, config, jahr)
     frist = verfall_frist(config, jahr)
     # Vor der Frist: Übertrag, der noch nicht eingeplant ist. Danach: verfallen.
     nicht_eingeplant = verfall_fuer(urlaube, config, jahr, uebertrag)
-    bundesland = config["bundesland"]
-    heute = date.today()
 
-    genommen = [u for u in urlaube if u["ende"] < heute and jahr in u["tage_im_jahr"]]
-    aktuell = [u for u in urlaube if u["start"] <= heute <= u["ende"]]
-    geplant = [u for u in urlaube if u["start"] > heute and jahr in u["tage_im_jahr"]]
+    im_jahr = [u for u in urlaube if jahr in u["tage_im_jahr"]]
+    genommen = [u for u in im_jahr if u["ende"] < heute]
+    aktuell = [u for u in im_jahr if u["start"] <= heute <= u["ende"]]
+    geplant = [u for u in im_jahr if u["start"] > heute]
 
-    tage_genommen = sum(u["tage_im_jahr"].get(jahr, 0) for u in genommen + aktuell)
-    tage_geplant = sum(u["tage_im_jahr"].get(jahr, 0) for u in geplant)
+    tage_genommen = sum(u["tage_im_jahr"][jahr] for u in genommen + aktuell)
+    tage_geplant = sum(u["tage_im_jahr"][jahr] for u in geplant)
     tage_rest = kontingent + uebertrag - tage_genommen - tage_geplant
     if heute > frist:
         tage_rest -= nicht_eingeplant
 
     lines = []
-    lines.append(f"# Urlaubsübersicht {jahr}")
-    lines.append("")
-    lines.append(f"*Zuletzt aktualisiert: {datetime.now().strftime('%d.%m.%Y %H:%M')}*  ")
-    lines.append(f"*Bundesland: {bundesland} (Feiertage werden abgezogen)*")
-    lines.append("")
-    lines.append("## Übersicht")
+    lines.append(f"{ebene} Übersicht")
     lines.append("")
     lines.append("| | Tage |")
     lines.append("|---|---:|")
@@ -255,16 +252,15 @@ def schreibe_markdown(urlaube: list[dict], ho: list[dict], krank: list[dict],
     def render_liste(titel: str, items: list[dict]):
         if not items:
             return
-        lines.append(f"## {titel}")
+        lines.append(f"{ebene} {titel}")
         lines.append("")
         lines.append("| Von | Bis | Arbeitstage | Titel |")
         lines.append("|---|---|---:|---|")
         for u in items:
-            tage_anzeige = u["tage_im_jahr"].get(jahr, u["arbeitstage"])
             lines.append(
                 f"| {u['start'].strftime('%d.%m.%Y')} "
                 f"| {u['ende'].strftime('%d.%m.%Y')} "
-                f"| {tage_anzeige} "
+                f"| {u['tage_im_jahr'][jahr]} "
                 f"| {u['titel']} |"
             )
         lines.append("")
@@ -272,6 +268,35 @@ def schreibe_markdown(urlaube: list[dict], ho: list[dict], krank: list[dict],
     render_liste("🏖️ Aktuell im Urlaub", aktuell)
     render_liste("📅 Geplante Urlaube", geplant)
     render_liste("✅ Bereits genommen", genommen)
+
+    return lines, (tage_genommen, tage_geplant, tage_rest)
+
+
+def schreibe_markdown(urlaube: list[dict], ho: list[dict], krank: list[dict],
+                      config: dict, pfad: Path):
+    """Generiert die Markdown-Datei."""
+    jahr = config["jahr"]
+    heute = date.today()
+
+    lines = []
+    lines.append(f"# Urlaubsübersicht {jahr}")
+    lines.append("")
+    lines.append(f"*Zuletzt aktualisiert: {datetime.now().strftime('%d.%m.%Y %H:%M')}*  ")
+    lines.append(f"*Bundesland: {config['bundesland']} (Feiertage werden abgezogen)*")
+    lines.append("")
+
+    abschnitt, (tage_genommen, tage_geplant, tage_rest) = urlaub_abschnitt(
+        urlaube, config, jahr, heute, "##")
+    lines += abschnitt
+
+    # Ausblick aufs nächste Jahr, sobald dort Urlaub eingetragen ist
+    naechstes = jahr + 1
+    if any(naechstes in u["tage_im_jahr"] for u in urlaube):
+        lines.append(f"## 🔭 Ausblick {naechstes}")
+        lines.append("")
+        lines.append(f"*Übertrag aus {jahr} ist eine Prognose (geplanter Urlaub gilt als genommen).*")
+        lines.append("")
+        lines += urlaub_abschnitt(urlaube, config, naechstes, heute, "###")[0]
 
     # ---------- Homeoffice & Krankheit ----------
     def tage_pro_jahr(events: list[dict]) -> dict[int, int]:

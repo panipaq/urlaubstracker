@@ -213,6 +213,10 @@ Das Wrapper-Skript:
 - nutzt das venv im Projektverzeichnis
 - gibt hilfreiche Fehlermeldungen falls etwas fehlt
 
+### Nächstes Jahr planen
+
+Sobald im Kalender Urlaub fürs nächste Jahr eingetragen ist, hängt der Tracker unten einen Abschnitt **Ausblick** (z.B. *Ausblick 2027*) an – mit eigener Übersicht inkl. Übertrag und Verfall-Warnung. Der Übertrag ist dabei eine Prognose: geplanter Urlaub gilt als genommen. Nach dem Jahreswechsel wird automatisch nur noch das neue Jahr angezeigt.
+
 
 ## Automatisierung
 
